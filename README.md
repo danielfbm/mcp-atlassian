@@ -40,7 +40,7 @@ https://github.com/user-attachments/assets/7fe9c488-ad0c-4876-9b54-120b666bb785
 
 ### 🔐 1. Authentication Setup
 
-MCP Atlassian supports three authentication methods:
+MCP Atlassian supports four authentication methods:
 
 #### A. API Token Authentication (Cloud) - **Recommended**
 
@@ -78,6 +78,63 @@ MCP Atlassian supports three authentication methods:
    - `ATLASSIAN_OAUTH_CLIENT_SECRET`
    - `ATLASSIAN_OAUTH_REDIRECT_URI`
    - `ATLASSIAN_OAUTH_SCOPE`
+
+#### D. HTTP Basic Authentication - **For Multi-User Scenarios**
+
+> [!NOTE]
+> HTTP Basic Authentication is ideal for multi-user scenarios where each user provides their own credentials via HTTP headers. This method works with both Cloud (using API tokens) and Server/Data Center (using username/password or API tokens).
+
+**For Multi-User HTTP Transport:**
+
+When running the MCP server as an HTTP service, users can authenticate using the standard `Authorization: Basic <base64-credentials>` header format.
+
+**Credentials Format:**
+- **Cloud**: `username:api_token` (where username is your Atlassian account email)
+- **Server/Data Center**: `username:password` or `username:api_token`
+
+**Example Usage:**
+```bash
+# Using curl with automatic base64 encoding
+curl -u "user@company.com:your_api_token" \
+  -H "Content-Type: application/json" \
+  http://localhost:9000/mcp
+
+# Using manual base64 encoding
+curl -H "Authorization: Basic dXNlckBjb21wYW55LmNvbTp5b3VyX2FwaV90b2tlbg==" \
+  -H "Content-Type: application/json" \
+  http://localhost:9000/mcp
+```
+
+**IDE Configuration Example:**
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian-service": {
+      "url": "http://localhost:9000/mcp",
+      "headers": {
+        "Authorization": "Basic dXNlckBjb21wYW55LmNvbTp5b3VyX2FwaV90b2tlbg=="
+      }
+    }
+  }
+}
+```
+
+**Security Considerations:**
+- Always use HTTPS in production environments
+- Base64 encoding is not encryption - credentials are easily decoded
+- For Cloud instances, use API tokens instead of passwords
+- Consider OAuth 2.0 or PAT methods for enhanced security
+
+#### Quick Reference: Authentication Methods
+
+| Method | Use Case | Cloud Support | Server/DC Support | Security Level |
+|--------|----------|---------------|-------------------|----------------|
+| **API Token (A)** | Environment config | ✅ Recommended | ✅ Supported | Medium |
+| **Personal Access Token (B)** | Environment config | ❌ Not available | ✅ Recommended | High |
+| **OAuth 2.0 (C)** | Environment config | ✅ Advanced | ❌ Not available | Highest |
+| **HTTP Basic Auth (D)** | Multi-user headers | ✅ With API tokens | ✅ With credentials | Low-Medium* |
+
+*\*Security level depends on using HTTPS and proper credential management*
 
 > [!IMPORTANT]
 > For the standard OAuth flow described above, include `offline_access` in your scope (e.g., `read:jira-work write:jira-work offline_access`). This allows the server to refresh the access token automatically.
@@ -596,8 +653,8 @@ Both transport types support single-user and multi-user authentication:
 **Authentication Options:**
 - **Single-User**: Use server-level authentication configured via environment variables
 - **Multi-User**: Each user provides their own authentication:
-  - Cloud: OAuth 2.0 Bearer tokens
-  - Server/Data Center: Personal Access Tokens (PATs)
+  - Cloud: OAuth 2.0 Bearer tokens or HTTP Basic Authentication (with API tokens)
+  - Server/Data Center: Personal Access Tokens (PATs) or HTTP Basic Authentication
 
 <details> <summary>Basic HTTP Transport Setup</summary>
 
@@ -668,6 +725,7 @@ Here's a complete example of setting up multi-user authentication with streamabl
 
 - **Cloud (OAuth 2.0):** Use this if your organization is on Atlassian Cloud and you have an OAuth access token for each user.
 - **Server/Data Center (PAT):** Use this if you are on Atlassian Server or Data Center and each user has a Personal Access Token (PAT).
+- **HTTP Basic Authentication:** Use this for both Cloud (with API tokens) and Server/Data Center (with username/password or API tokens) when you want standard HTTP Basic Auth.
 
 **Cloud (OAuth 2.0) Example:**
 ```json
@@ -697,6 +755,48 @@ Here's a complete example of setting up multi-user authentication with streamabl
 }
 ```
 
+**HTTP Basic Authentication Examples:**
+
+*For Atlassian Cloud (using API tokens):*
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian-service": {
+      "url": "http://localhost:9000/mcp",
+      "headers": {
+        "Authorization": "Basic <BASE64_ENCODED_EMAIL:API_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+*For Server/Data Center (using username/password or API tokens):*
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian-service": {
+      "url": "http://localhost:9000/mcp",
+      "headers": {
+        "Authorization": "Basic <BASE64_ENCODED_USERNAME:PASSWORD_OR_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+**How to generate the Base64 encoded credentials:**
+
+```bash
+# For Cloud (email:api_token)
+echo -n "user@company.com:your_api_token_here" | base64
+
+# For Server/Data Center (username:password)
+echo -n "jira_username:your_password_here" | base64
+
+# Result example: dXNlckBjb21wYW55LmNvbTp5b3VyX2FwaV90b2tlbl9oZXJl
+```
+
 4. Required environment variables in `.env`:
    ```bash
    JIRA_URL=https://your-company.atlassian.net
@@ -712,9 +812,11 @@ Here's a complete example of setting up multi-user authentication with streamabl
 > - The server should have its own fallback authentication configured (e.g., via environment variables for API token, PAT, or its own OAuth setup using --oauth-setup). This is used if a request doesn't include user-specific authentication.
 > - **OAuth**: Each user needs their own OAuth access token from your Atlassian OAuth app.
 > - **PAT**: Each user provides their own Personal Access Token.
+> - **HTTP Basic Auth**: Each user provides their username and password/API token via standard HTTP Basic Authentication headers.
 > - **Multi-Cloud**: For OAuth users, optionally include `X-Atlassian-Cloud-Id` header to specify which Atlassian cloud instance to use
-> - The server will use the user's token for API calls when provided, falling back to server auth if not
-> - User tokens should have appropriate scopes for their needed operations
+> - The server will use the user's credentials for API calls when provided, falling back to server auth if not
+> - User credentials should have appropriate permissions for their needed operations
+> - **Security**: Always use HTTPS in production when using Basic Authentication
 
 </details>
 
@@ -802,6 +904,11 @@ The server provides two ways to control tool access:
 - **Authentication Failures**:
     - For Cloud: Check your API tokens (not your account password)
     - For Server/Data Center: Verify your personal access token is valid and not expired
+    - For HTTP Basic Auth: Ensure your base64 encoding is correct and credentials are valid
+        - Test encoding: `echo -n "username:password" | base64`
+        - Verify the Authorization header format: `Authorization: Basic <base64-string>`
+        - For Cloud: Use email:api_token format
+        - For Server/Data Center: Use username:password or username:api_token format
     - For older Confluence servers: Some older versions require basic authentication with `CONFLUENCE_USERNAME` and `CONFLUENCE_API_TOKEN` (where token is your password)
 - **SSL Certificate Issues**: If using Server/Data Center and encounter SSL errors, set `CONFLUENCE_SSL_VERIFY=false` or `JIRA_SSL_VERIFY=false`
 - **Permission Errors**: Ensure your Atlassian account has sufficient permissions to access the spaces/projects
@@ -842,6 +949,47 @@ To verify custom headers are being applied correctly:
    ```
 
 **Security Note**: Header values containing sensitive information (tokens, passwords) are automatically masked in logs to prevent accidental exposure.
+
+### Debugging HTTP Basic Authentication
+
+When using HTTP Basic Authentication, you can debug authentication issues:
+
+1. **Verify Base64 Encoding**: Test your credentials encoding manually:
+   ```bash
+   # Test your encoding
+   echo -n "your_username:your_password" | base64
+
+   # Decode to verify
+   echo "dXNlcm5hbWU6cGFzc3dvcmQ=" | base64 -d
+   ```
+
+2. **Test with curl**: Verify your credentials work directly:
+   ```bash
+   # Let curl handle encoding
+   curl -u "username:password" -v http://localhost:9000/mcp
+
+   # Or use manual header
+   curl -H "Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=" -v http://localhost:9000/mcp
+   ```
+
+3. **Check Server Logs**: Enable debug logging to see authentication processing:
+   ```bash
+   # Enable verbose logging
+   MCP_VERY_VERBOSE=true
+   MCP_LOGGING_STDOUT=true
+   ```
+
+   Look for log entries like:
+   ```
+   DEBUG UserTokenMiddleware.dispatch: Basic auth extracted for user: username
+   DEBUG Creating user-specific JiraFetcher (type: basic) for user username
+   ```
+
+4. **Common Basic Auth Issues**:
+   - **401 Unauthorized**: Check credentials are correct and properly encoded
+   - **Invalid encoding errors**: Ensure no extra characters in base64 string
+   - **Missing colon**: Verify username:password format before encoding
+   - **CAPTCHA triggered**: Multiple failed attempts may trigger CAPTCHA protection
 
 ### Debugging Tools
 
