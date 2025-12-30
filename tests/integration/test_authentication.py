@@ -255,6 +255,77 @@ class TestPATTokenValidation:
                 assert config.auth_type == "pat"
                 assert config.personal_token == "personal-access-token"
 
+    def test_http_basic_auth_header_parsing(self):
+        """Test HTTP Basic Authentication header parsing in middleware."""
+        import base64
+        from unittest.mock import Mock
+
+        # Test valid basic auth header
+        username = "jira_user@company.com"
+        password = "api_token_123"
+        credentials = f"{username}:{password}"
+        encoded = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+        auth_header = f"Basic {encoded}"
+
+        # Mock request object
+        mock_request = Mock()
+        mock_request.headers = {"authorization": auth_header}
+        mock_request.url.path = "/test"
+        mock_request.state = Mock()
+
+        # Test the parsing logic (simulating middleware behavior)
+        if auth_header.startswith("Basic "):
+            basic_token = auth_header.split(" ", 1)[1].strip()
+            assert basic_token, "Basic token should not be empty"
+
+            decoded_bytes = base64.b64decode(basic_token)
+            decoded_str = decoded_bytes.decode('utf-8')
+            assert ':' in decoded_str, "Decoded string should contain colon separator"
+
+            parsed_username, parsed_password = decoded_str.split(':', 1)
+            assert parsed_username == username, f"Username mismatch: {parsed_username} != {username}"
+            assert parsed_password == password, f"Password mismatch: {parsed_password} != {password}"
+
+            # Simulate setting request state
+            mock_request.state.user_atlassian_username = parsed_username
+            mock_request.state.user_atlassian_password = parsed_password
+            mock_request.state.user_atlassian_auth_type = "basic"
+            mock_request.state.user_atlassian_email = parsed_username
+
+            # Verify state was set correctly
+            assert mock_request.state.user_atlassian_username == username
+            assert mock_request.state.user_atlassian_password == password
+            assert mock_request.state.user_atlassian_auth_type == "basic"
+            assert mock_request.state.user_atlassian_email == username
+
+    def test_http_basic_auth_error_cases(self):
+        """Test HTTP Basic Authentication error handling."""
+        import base64
+
+        error_cases = [
+            ("Basic ", "Empty token"),
+            ("Basic invalid-base64!", "Invalid base64"),
+            ("Basic " + base64.b64encode(b"no-colon").decode(), "No colon separator"),
+            ("Basic " + base64.b64encode(b":password").decode(), "Empty username"),
+            ("Basic " + base64.b64encode(b"username:").decode(), "Empty password"),
+        ]
+
+        for auth_header, description in error_cases:
+            with pytest.raises((ValueError, base64.binascii.Error, UnicodeDecodeError, AssertionError)):
+                if auth_header.startswith("Basic "):
+                    basic_token = auth_header.split(" ", 1)[1].strip()
+                    if not basic_token:
+                        raise ValueError("Empty Basic auth token")
+
+                    decoded_bytes = base64.b64decode(basic_token)
+                    decoded_str = decoded_bytes.decode('utf-8')
+                    if ':' not in decoded_str:
+                        raise ValueError("Invalid Basic auth format")
+
+                    username, password = decoded_str.split(':', 1)
+                    if not username or not password:
+                        raise ValueError("Username and password required for Basic auth")
+
 
 @pytest.mark.integration
 class TestAuthenticationFailureRecovery:

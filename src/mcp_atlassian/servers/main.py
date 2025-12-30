@@ -1,5 +1,6 @@
 """Main FastMCP server setup for Atlassian integration."""
 
+import base64
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -304,13 +305,53 @@ class UserTokenMiddleware(BaseHTTPMiddleware):
                 logger.debug(
                     "UserTokenMiddleware.dispatch: Set request.state for PAT auth."
                 )
+            elif auth_header and auth_header.startswith("Basic "):
+                basic_token = auth_header.split(" ", 1)[1].strip()
+                if not basic_token:
+                    return JSONResponse(
+                        {"error": "Unauthorized: Empty Basic auth token"},
+                        status_code=401,
+                    )
+                try:
+                    # Decode the base64 encoded username:password
+                    decoded_bytes = base64.b64decode(basic_token)
+                    decoded_str = decoded_bytes.decode('utf-8')
+                    if ':' not in decoded_str:
+                        return JSONResponse(
+                            {"error": "Unauthorized: Invalid Basic auth format"},
+                            status_code=401,
+                        )
+                    username, password = decoded_str.split(':', 1)
+                    if not username or not password:
+                        return JSONResponse(
+                            {"error": "Unauthorized: Username and password required for Basic auth"},
+                            status_code=401,
+                        )
+                except (base64.binascii.Error, UnicodeDecodeError) as e:
+                    logger.warning(f"UserTokenMiddleware.dispatch: Invalid Basic auth encoding: {e}")
+                    return JSONResponse(
+                        {"error": "Unauthorized: Invalid Basic auth encoding"},
+                        status_code=401,
+                    )
+
+                logger.debug(
+                    f"UserTokenMiddleware.dispatch: Basic auth extracted for user: {username}"
+                )
+                # Store the credentials in a format that dependencies can use
+                request.state.user_atlassian_username = username
+                request.state.user_atlassian_password = password
+                request.state.user_atlassian_auth_type = "basic"
+                request.state.user_atlassian_email = username  # Use username as email context
+                logger.debug(
+                    "UserTokenMiddleware.dispatch: Set request.state for Basic auth."
+                )
             elif auth_header:
                 logger.warning(
                     f"Unsupported Authorization type for {request.url.path}: {auth_header.split(' ', 1)[0] if ' ' in auth_header else 'UnknownType'}"
                 )
                 return JSONResponse(
                     {
-                        "error": "Unauthorized: Only 'Bearer <OAuthToken>' or 'Token <PAT>' types are supported."
+                        "error": "Unauthorized: 'Bearer <OAuthToken>', 'Token <PAT>', or 'Basic <base64-credentials>' types are supported."
                     },
                     status_code=401,
                 )
